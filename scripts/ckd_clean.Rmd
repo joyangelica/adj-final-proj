@@ -1,0 +1,279 @@
+---
+title: "ADJ Final Project - Clean"
+author: "Joy Mazur"
+date: "2024-04-28"
+output: html_document
+---
+
+Query 1 downloaded morning 4/27/24. 
+Underlying Cause of Death, 1999-2020
+Queried ICD-10 codes N17-N19 (all having to do with renal failure, associated with chronic kidney disease)
+URL: https://wonder.cdc.gov/controller/saved/D76/D389F388
+NOTE: Total deaths are 979,364, total population 6,746,356,647, total crude rate 14.5	
+
+Query 2 downloaded morning 4/27/24
+Multiple Cause of Death, 1999-2020
+Queried ICD-10 codes H40, I10-I15, I20-I25, E10-E14, N25.1, I51.6 (associated with diseases that are comorbidities of CKD)
+URL: https://wonder.cdc.gov/controller/saved/D77/D389F387
+NOTE: Total deaths are 20,065,194, total population 6,746,356,647, total crude rate 297.4
+
+Load libraries
+```{r}
+library(tidyverse)
+library(janitor)
+library(data.table)
+library(lubridate)
+```
+
+Load files
+```{r}
+ckd_death <- read_delim("data/ckd_cdc.txt", delim = "\t", col_types ="ccniiin")
+comorb <- read_delim("data/comorb.txt", delim = "\t", col_types="ccniiiin")
+```
+
+Clean files - remove notes and clean column names
+```{r}
+ckd_death %>% 
+  filter(!is.na(Notes)) %>% 
+  select(Notes)
+  
+ckd_death <- ckd_death %>% 
+  filter(is.na(Notes)) %>% 
+  select(-Notes)
+
+ckd_death <- clean_names(ckd_death)
+
+comorb %>% 
+  filter(!is.na(Notes)) %>% 
+  select(Notes)
+  
+comorb <- comorb %>% 
+  filter(is.na(Notes)) %>% 
+  select(-Notes)
+
+comorb <- clean_names(comorb)
+```
+
+Playing around with CKD dataset
+```{r}
+ckd_death %>% 
+  arrange(desc(deaths))
+#Texas has a lot of recent years where they have the most deaths - not surprising since they have a huge population
+
+ckd_death %>% 
+  summarize(tot_death = sum(deaths, na.rm=T))
+#Total deaths attributed to CKD from 1999-2020 is 979,364
+#This lines up with the query results I received from the in-page table on the site
+
+ckd_death %>% 
+  group_by(state) %>% 
+  arrange(desc(crude_rate))
+#West Virginia had the highest crude rate in 2020 at 30.7
+
+ckd_death %>% 
+  filter(year=="1999") %>% 
+  arrange(desc(crude_rate))
+#Alabama had the highest crude rate: 22.0
+
+ckd_death %>% 
+  group_by(state, deaths) %>% 
+  filter(year_code=="1999") %>% 
+  arrange(desc(crude_rate))
+#discovered here that "2020" is not present in the year column but is present in the year_code column - using year_code column is probably safest here
+
+ckd_death %>% 
+  filter(year_code=="2020", state=="Alabama")
+#Alabama's crude rate of death in 2020 was 21.8, just a little lower than it was in 1999. This shows not much progress has been made in that state at least
+
+ckd_death %>% 
+  group_by(state, deaths) %>% 
+  filter(year_code=="2020") %>% 
+  arrange(desc(crude_rate))
+#West Virginia had the highest crude rate in 2020, with Missouri coming in second at a crude rate of 27.0
+```
+
+Looking at Missouri CKD data
+```{r}
+mo_ckdrate <- ckd_death %>% 
+  group_by(state, deaths) %>% 
+  filter(state=="Missouri") %>% 
+  arrange(desc(crude_rate))
+#While not exactly linear, Missouri's crude rate of CKD death has only really increased over time
+#Highest crude rate of death was 2020 with a crude rate of 27.0 
+
+ckd_death %>% 
+  filter(state=="Missouri") %>% 
+  summarize(tot_death=sum(deaths, na.rm=T))
+#total deaths = 26,986 deaths
+
+ckd_death %>% 
+  filter(state=="Missouri") %>% 
+  summarize(tot_pop=sum(population,na.rm=T))
+#total population = 130,170,885 people
+
+(26986/130170885)*100000
+#Missouri crude rate over time = 20.7 
+```
+
+Questioning the comorbidity dataset
+```{r}
+comorb %>% 
+  summarize(tot_death = sum(deaths, na.rm=T))
+#Total amount of deaths is 20,065,194 
+#Matches up with the results of the query on the webpage 
+
+comorb %>% 
+  arrange(desc(deaths))
+#California in 2020 had the most deaths out of anything else - again, not surprising because of population there
+
+comorb %>% 
+  filter(year_code=="1999") %>% 
+  arrange(desc(crude_rate))
+#West Virginia had the highest crude rate with 468.5 deaths per 100,000
+
+comorb %>% 
+  filter(year_code=="2020") %>% 
+  arrange(desc(crude_rate))
+#Oklahoma had the highest crude rate with 641.0 deaths per 100,000 
+
+comorb %>% 
+  filter(year_code=="2020") %>% 
+  arrange(desc(population))
+#California in 2020 had the highest population
+```
+
+Looking at Missouri comorbidity data
+```{r}
+mo_comrate <- comorb %>% 
+  group_by(state, deaths) %>% 
+  filter(state=="Missouri") %>% 
+  arrange(desc(crude_rate))
+#Missouri had the highest rate of death in 1999, with a crude rate of 380.4 
+#Again not linear, but it seems like the rate generally decreased over time vs. CKD rate increasing over time. That is interesting
+```
+
+Creating graphs for Missouri
+```{r}
+#CKD death rate
+ggplot(mo_ckdrate, aes(x=year_code, y=crude_rate)) +
+  geom_line() +
+  labs(title="Crude rate of CKD deaths in Missouri over time", 
+       y="Crude Rate",
+       x="Year")
+
+ggplot(mo_comrate, aes(x=year_code, y=crude_rate)) +
+  geom_line() +
+  labs(title="Crude rate of CKD comorbidity deaths in Missouri over time", 
+       y="Crude Rate",
+       x="Year")
+```
+
+
+Creating new dataframes for rates by state for the whole dataset 
+```{r}
+ckd_state_totrate <- ckd_death %>% 
+  group_by(state) %>% 
+  summarize(tot_death=sum(deaths, na.rm=T), tot_pop=sum(population, na.rm=T)) %>% 
+  mutate(tot_rate = tot_death/tot_pop*100000) %>% 
+  arrange(desc(tot_rate))
+#West Virginia had the highest overall rate of death with 24.3. Missouri ranked eighth
+
+comorb_state_totrate <- comorb %>% 
+  group_by(state) %>% 
+  summarize(tot_death=sum(deaths, na.rm=T), tot_pop=sum(population, na.rm=T)) %>% 
+  mutate(tot_rate = tot_death/tot_pop*100000) %>% 
+  arrange(desc(tot_rate))
+#West Virginia had the highest total death rate from comorbidities over time with a rate of 455.3
+```
+
+Creating new dataframes for national rates by year for the whole dataset
+```{r}
+ckd_year_totrate <- ckd_death %>% 
+  group_by(year_code) %>% 
+  summarize(tot_death=sum(deaths, na.rm=T), tot_pop=sum(population, na.rm=T)) %>% 
+  mutate(tot_rate = tot_death/tot_pop*100000) %>% 
+  arrange(desc(tot_rate))
+#2020 had the highest national CKD death rate with a crude rate of 15.6
+
+comorb_year_totrate <- comorb %>% 
+  group_by(year_code) %>% 
+  summarize(tot_death=sum(deaths, na.rm=T), tot_pop=sum(population, na.rm=T)) %>% 
+  mutate(tot_rate = tot_death/tot_pop*100000) %>% 
+  arrange(desc(tot_rate))
+#2020 has the highest crude rate of death with a rate of about 367
+```
+
+Creating graphs for the national rates by year
+```{r}
+ggplot(ckd_year_totrate, aes(x=year_code, y=tot_rate)) +
+  geom_line() +
+  labs(title="National crude rate of CKD deaths over time", 
+       x="Year", 
+       y="National crude rate")
+
+ggplot(comorb_year_totrate, aes(x=year_code, y=tot_rate)) +
+  geom_line() +
+  labs(title="National crude rate of CKD comorbidity deaths over time", 
+       x="Year", 
+       y="National crude rate")
+```
+
+
+Joining the CKD and comorbidity death rates
+```{r}
+rate_join <- inner_join(ckd_year_totrate, comorb_year_totrate, by = c("year_code"="year_code")) %>% 
+  select(-tot_death.x, -tot_pop.x, -tot_death.y, -tot_pop.y) %>% 
+  mutate(ckd_rate = tot_rate.x, comorb_rate = tot_rate.y) %>% 
+  select(-tot_rate.x, -tot_rate.y)
+
+longrate_join <- rate_join %>%
+  pivot_longer(ckd_rate:comorb_rate)
+```
+
+Making a bar chart from joined table
+```{r}
+ggplot(longrate_join, aes(x=year_code, y=value, fill=name)) +
+  geom_bar(position="dodge", stat="identity") +
+  labs(title="CKD vs. CKD comorbidity death rates",
+       x="Year",
+       y="Rate",
+       fill="Disease")+
+  scale_fill_discrete(labels=c("CKD", "Comorbidity"))
+```
+
+
+Questions and answers about my data: 
+
+1. What states have the highest rates of deaths attributed to CKD? Is this the same as the states that have the highest rates of death attributed to comorbidities of CKD? 
+
+A: The five states with the highest rates of death attributed to CKD are West Virginia (24.3), Louisiana (23.6), Mississippi (23.2), Pennsylvania (22.6) and Arkansas (22). Missouri ranks eighth (20.7). This is similar but not the same as the five states with the highest rates of death attributed to comorbidities of CKD. Those states are West Virginia (455.3), Oklahoma (429.2), Rhode Island (390.1), Ohio (375.2) and Mississippi (369.2). Missouri ranks eighteenth here (325.9).
+
+//
+
+2. What year had the highest death rate over time for CKD and for comorbidities?
+
+A: 2020 had the highest death rate for both CKD (15.6) and its comorbidities (367.0). For obvious reasons, this makes sense. 
+
+//
+
+3. How has the rate of CKD and comorbidities fared over time nationally? For Missouri? 
+
+A: The ggplots are very helpful in illustrating these differences over time. 
+For CKD in Missouri, the death rate generally increased over the past two decades. For CKD comorbidities, death rates also generally decreased.
+
+Nationally, CKD death rates generally increased over time. For comorbidities, death rates generally decreased, until about 2018 when they started to rise. 
+
+//
+
+4. Are there any problems or limitations with this dataset? 
+
+A: For some reason, all entries for 2020 have 2020 in the year_code column but not in the year column. Because of this, when grouping or filtering by year, I always used the year_code column for accuracy.
+
+//
+
+5. What can we reason from this data analysis? 
+
+A: When setting out to analyze these datasets, I wanted to answer one big question: Can we reasonably conclude from this data that CKD is substantially underreported on death records, as claimed by the National Kidney Foundation and prominent nephrologists? 
+
+At the end of the day, I believe there are too many confounding variables and too many unknowns to definitively conclude anything. I think it is reasonable to think that CKD might play a larger part in deaths than recorded because of the high death rate of comorbidities compared to the much lower rate of CKD. However, we must again keep in mind that the comorbidity dataset includes multiple causes of death, so it's best to stay cautious with any assumptions. 
+Now, I'm partial to believe the expert nephrologists and foundations with much more resources and funding than I have, so that is also a factor in my reasoning. However, I again think that nothing can be definitively assumed from this data analysis. 
